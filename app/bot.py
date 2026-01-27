@@ -274,18 +274,18 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"⚠️ LeetCode foydalanuvchi topilmadi: {username}\n"
                 f"Username to'g'riligini tekshiring: /setusername\n"
-                f"TZ: {tz}\nRemind: {', '.join(times) if times else 'yo'q'}"
+                f"TZ: {tz}\nRemind: {', '.join(times) if times else "yo'q"}"
             )
         else:
             await update.message.reply_text(
                 f"⚠️ Xato: {error_msg}\n"
-                f"👤 {username}\nTZ: {tz}\nRemind: {', '.join(times) if times else 'yo'q'}"
+                f"👤 {username}\nTZ: {tz}\nRemind: {', '.join(times) if times else "yo'q"}"
             )
         return
     except Exception as e:
         await update.message.reply_text(
             f"⚠️ Kutilmagan xato: {type(e).__name__}: {e}\n"
-            f"👤 {username}\nTZ: {tz}\nRemind: {', '.join(times) if times else 'yo'q'}"
+            f"👤 {username}\nTZ: {tz}\nRemind: {', '.join(times) if times else "yo'q"}"
         )
         return
     

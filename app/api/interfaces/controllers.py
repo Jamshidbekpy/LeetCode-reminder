@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -49,7 +49,7 @@ def _user_to_response(user) -> UserResponse:
 
 @router.get("/health", response_model=HealthResponse, tags=["Health"])
 @limiter.limit("30/minute")
-async def health_check(repository: UserRepository = Depends(get_user_repository)):
+async def health_check(request: Request, repository: UserRepository = Depends(get_user_repository)):
     """Health check endpoint"""
     try:
         users = repository.get_all(active_only=False)
@@ -68,6 +68,7 @@ async def health_check(repository: UserRepository = Depends(get_user_repository)
 @router.get("/users", response_model=UserListResponse, tags=["Users"])
 @limiter.limit("60/minute")
 async def get_all_users(
+    request: Request,
     active_only: bool = Query(True, description="Return only active users"),
     limit: Optional[int] = Query(None, ge=1, le=100, description="Limit results"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
@@ -100,6 +101,7 @@ async def get_all_users(
 )
 @limiter.limit("60/minute")
 async def get_user_by_telegram_id(
+    request: Request,
     telegram_id: int,
     repository: UserRepository = Depends(get_user_repository),
 ):
@@ -134,6 +136,7 @@ async def get_user_by_telegram_id(
 )
 @limiter.limit("60/minute")
 async def get_users_by_leetcode_username(
+    request: Request,
     leetcode_username: str,
     repository: UserRepository = Depends(get_user_repository),
 ):
@@ -159,7 +162,7 @@ async def get_users_by_leetcode_username(
 
 @router.get("/stats", response_model=UserStatsResponse, tags=["Statistics"])
 @limiter.limit("30/minute")
-async def get_stats(repository: UserRepository = Depends(get_user_repository)):
+async def get_stats(request: Request, repository: UserRepository = Depends(get_user_repository)):
     """Get user statistics"""
     try:
         use_case = GetUserStatsUseCase(repository)
