@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
+import json
 import random
 import time
+from dataclasses import dataclass
+from datetime import datetime
+
 import requests
 import pytz
 from requests.adapters import HTTPAdapter
@@ -38,6 +40,9 @@ class AcceptedInfo:
     slug: str
     lang: str
     time_hhmm: str
+
+# requests 2.28+ has JSONDecodeError; fallback to stdlib for older versions
+_RequestsJSONDecodeError = getattr(requests.exceptions, "JSONDecodeError", json.JSONDecodeError)
 
 # Global session with retry strategy
 _session = None
@@ -139,9 +144,29 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
                     time.sleep(retry_after + random.uniform(1, 5))
                     continue
                 raise RuntimeError(f"Rate limited. Retry after {retry_after} seconds")
-            
+
             response.raise_for_status()
-            data = response.json()
+
+            text = response.text.strip()
+            if not text or not (text.startswith("{") or text.startswith("[")):
+                last_error = RuntimeError(
+                    "LeetCode bo'sh yoki noto'g'ri javob qaytardi "
+                    f"(status={response.status_code}). Keyinroq urinib ko'ring."
+                )
+                if attempt < max_retries - 1:
+                    continue
+                raise last_error
+
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError as e:
+                last_error = RuntimeError(
+                    f"LeetCode javobi JSON emas: {e}. "
+                    "Sayt vaqtincha bloklagan yoki o'zgartirgan bo'lishi mumkin. Keyinroq urinib ko'ring."
+                )
+                if attempt < max_retries - 1:
+                    continue
+                raise last_error
             
             # Check for GraphQL errors
             if "errors" in data:
@@ -187,13 +212,30 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
             if attempt < max_retries - 1:
                 continue
             raise RuntimeError(f"Request timeout after {max_retries} attempts: {e}")
-        
-        except requests.exceptions.RequestException as e:
-            last_error = e
+
+        except (json.JSONDecodeError, _RequestsJSONDecodeError) as e:
+            last_error = RuntimeError(
+                "LeetCode bo'sh yoki noto'g'ri javob qaytardi (blok/cheklov bo'lishi mumkin). "
+                "Bir necha daqiqa keyin /check yoki /status ni qayta urinib ko'ring."
+            )
             if attempt < max_retries - 1:
                 continue
-            raise RuntimeError(f"Request failed after {max_retries} attempts: {e}")
-        
+            raise last_error
+
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            err_msg = str(e).strip()
+            if "expecting value" in err_msg.lower():
+                last_error = RuntimeError(
+                    "LeetCode bo'sh yoki noto'g'ri javob qaytardi (blok/cheklov bo'lishi mumkin). "
+                    "Bir necha daqiqa keyin /check yoki /status ni qayta urinib ko'ring."
+                )
+            if attempt < max_retries - 1:
+                continue
+            raise last_error if isinstance(last_error, RuntimeError) else RuntimeError(
+                f"So'rov {max_retries} marta muvaffaqiyatsiz: {e}"
+            )
+
         except (KeyError, ValueError, TypeError) as e:
             # Data parsing errors - don't retry
             raise RuntimeError(f"Failed to parse LeetCode response: {e}")
