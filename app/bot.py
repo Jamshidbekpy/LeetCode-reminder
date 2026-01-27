@@ -8,6 +8,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 from app.config import get_settings
 from app.storage import Storage
+from app.database import Database
 from app.scheduler import run_scheduler
 from app.leetcode import solved_today, problem_link
 
@@ -27,7 +28,19 @@ def _normalize_username(u: str) -> str:
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     storage: Storage = context.application.bot_data["storage"]
     chat_id = update.effective_chat.id
-    storage.add_user(chat_id)
+    
+    # Get user info from Telegram
+    user = update.effective_user
+    telegram_username = user.username if user else None
+    telegram_first_name = user.first_name if user else None
+    telegram_last_name = user.last_name if user else None
+    
+    storage.add_user(
+        chat_id=chat_id,
+        telegram_username=telegram_username,
+        telegram_first_name=telegram_first_name,
+        telegram_last_name=telegram_last_name,
+    )
 
     await update.message.reply_text(
         "🤖 LeetCode Reminder botga xush kelibsiz!\n\n"
@@ -70,8 +83,20 @@ async def setusername_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     username = _normalize_username(context.args[0])
+    
+    # Get user info from Telegram
+    user = update.effective_user
+    telegram_username = user.username if user else None
+    telegram_first_name = user.first_name if user else None
+    telegram_last_name = user.last_name if user else None
+    
     storage.set_username(chat_id, username)
-    storage.add_user(chat_id)
+    storage.add_user(
+        chat_id=chat_id,
+        telegram_username=telegram_username,
+        telegram_first_name=telegram_first_name,
+        telegram_last_name=telegram_last_name,
+    )
 
     await update.message.reply_text(
         f"✅ Username saqlandi: {username}\n"
@@ -197,7 +222,21 @@ async def check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     tz = storage.get_timezone(chat_id, settings.default_tz)
-    ok, info = solved_today(username, tz)
+    try:
+        ok, info = solved_today(username, tz)
+    except RuntimeError as e:
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            await update.message.reply_text(
+                f"⚠️ LeetCode foydalanuvchi topilmadi: {username}\n"
+                f"Username to'g'riligini tekshiring: /setusername"
+            )
+        else:
+            await update.message.reply_text(f"⚠️ Xato: {error_msg}")
+        return
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Kutilmagan xato: {type(e).__name__}: {e}")
+        return
 
     if ok and info:
         await update.message.reply_text(
@@ -227,7 +266,29 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    ok, info = solved_today(username, tz)
+    try:
+        ok, info = solved_today(username, tz)
+    except RuntimeError as e:
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            await update.message.reply_text(
+                f"⚠️ LeetCode foydalanuvchi topilmadi: {username}\n"
+                f"Username to'g'riligini tekshiring: /setusername\n"
+                f"TZ: {tz}\nRemind: {', '.join(times) if times else 'yo'q'}"
+            )
+        else:
+            await update.message.reply_text(
+                f"⚠️ Xato: {error_msg}\n"
+                f"👤 {username}\nTZ: {tz}\nRemind: {', '.join(times) if times else 'yo'q'}"
+            )
+        return
+    except Exception as e:
+        await update.message.reply_text(
+            f"⚠️ Kutilmagan xato: {type(e).__name__}: {e}\n"
+            f"👤 {username}\nTZ: {tz}\nRemind: {', '.join(times) if times else 'yo'q'}"
+        )
+        return
+    
     if ok and info:
         await update.message.reply_text(
             f"🟢 Bugun bajarilgan: {info.title} ({info.time_hhmm})\n{problem_link(info.slug)}",
@@ -255,6 +316,7 @@ async def _post_init(app: Application):
             default_times=settings.default_remind_times,
             poll_seconds=settings.poll_seconds,
             lc_check_seconds=settings.lc_check_seconds,
+            use_celery=settings.use_celery,
         )
     )
 
@@ -262,7 +324,15 @@ def main():
     settings = get_settings()
 
     redis_client = Redis.from_url(settings.redis_url, decode_responses=False)
-    storage = Storage(redis_client)
+    
+    # Initialize PostgreSQL database (optional - won't break if connection fails)
+    db = None
+    try:
+        db = Database(settings.postgresql_url)
+    except Exception as e:
+        print(f"⚠️ PostgreSQL connection failed (will continue with Redis only): {e}")
+    
+    storage = Storage(redis_client, db=db)
 
     app = (
         Application.builder()
@@ -273,6 +343,7 @@ def main():
 
     app.bot_data["settings"] = settings
     app.bot_data["storage"] = storage
+    app.bot_data["database"] = db  # Store database reference for API
 
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("help", help_cmd))

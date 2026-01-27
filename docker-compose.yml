@@ -5,10 +5,60 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: leetcode_bot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   bot:
     build: .
     restart: always
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - postgres
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  api:
+    build: .
+    restart: always
+    command: python -m app.api_server
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    ports:
+      - "8000:8000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  celery_worker:
+    build: .
+    restart: always
+    command: celery -A app.celery_app worker --loglevel=info
     env_file:
       - .env
     depends_on:
@@ -19,5 +69,21 @@ services:
         max-size: "10m"
         max-file: "5"
 
+  celery_beat:
+    build: .
+    restart: always
+    command: celery -A app.celery_app beat --loglevel=info
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - celery_worker
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
 volumes:
   redis_data:
+  postgres_data:

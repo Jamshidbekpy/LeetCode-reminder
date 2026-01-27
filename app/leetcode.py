@@ -2,10 +2,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import random
+import time
 import requests
 import pytz
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 LC_GRAPHQL = "https://leetcode.com/graphql/"
+
+# Real browser user agents (rotate to avoid detection)
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+]
 
 QUERY = """
 query recent($username: String!, $limit: Int!) {
@@ -26,37 +39,167 @@ class AcceptedInfo:
     lang: str
     time_hhmm: str
 
+# Global session with retry strategy
+_session = None
+
+def _get_session() -> requests.Session:
+    """Create or return a session with proper retry strategy and headers."""
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        
+        # Retry strategy: exponential backoff
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["POST", "GET"],
+        )
+        
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        _session.mount("https://", adapter)
+        _session.mount("http://", adapter)
+    
+    return _session
+
+def _get_headers() -> dict[str, str]:
+    """Generate browser-like headers to avoid detection."""
+    return {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Content-Type": "application/json",
+        "Origin": "https://leetcode.com",
+        "Referer": "https://leetcode.com/",
+        "Connection": "keep-alive",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+    }
+
 def problem_link(slug: str) -> str:
     if not slug:
         return "https://leetcode.com/problemset/"
     return f"https://leetcode.com/problems/{slug}/"
 
-def solved_today(username: str, tz_name: str) -> tuple[bool, AcceptedInfo | None]:
+def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[bool, AcceptedInfo | None]:
+    """
+    Check if user solved a problem today.
+    
+    Args:
+        username: LeetCode username
+        tz_name: Timezone name (e.g., 'Asia/Tashkent')
+        max_retries: Maximum number of retry attempts
+    
+    Returns:
+        Tuple of (solved_today: bool, AcceptedInfo | None)
+    
+    Raises:
+        RuntimeError: If API returns errors or request fails after retries
+        requests.RequestException: If network request fails
+    """
     tz = pytz.timezone(tz_name)
     today = datetime.now(tz).date()
-
-    payload = {"query": QUERY, "variables": {"username": username, "limit": 50}}
-    r = requests.post(LC_GRAPHQL, json=payload, timeout=20)
-    r.raise_for_status()
-    data = r.json()
-
-    if "errors" in data:
-        raise RuntimeError(f"LeetCode GraphQL error: {data['errors']}")
-
-    subs = (data.get("data") or {}).get("recentSubmissionList") or []
-
-    for s in subs:
+    
+    payload = {
+        "query": QUERY,
+        "variables": {"username": username, "limit": 50},
+        "operationName": "recent"
+    }
+    
+    session = _get_session()
+    headers = _get_headers()
+    
+    last_error = None
+    
+    for attempt in range(max_retries):
         try:
-            ts = int(s["timestamp"])
-        except Exception:
-            continue
-        dt = datetime.fromtimestamp(ts, tz)
-        if dt.date() == today and s.get("statusDisplay") == "Accepted":
-            return True, AcceptedInfo(
-                title=s.get("title") or "Accepted",
-                slug=s.get("titleSlug") or "",
-                lang=s.get("lang") or "",
-                time_hhmm=dt.strftime("%H:%M"),
+            # Random delay between requests to mimic human behavior
+            if attempt > 0:
+                delay = random.uniform(1.0, 3.0) * (attempt + 1)
+                time.sleep(delay)
+            
+            # Make request with proper headers
+            response = session.post(
+                LC_GRAPHQL,
+                json=payload,
+                headers=headers,
+                timeout=30,
+                allow_redirects=True,
             )
-
+            
+            # Check for rate limiting
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 60))
+                if attempt < max_retries - 1:
+                    time.sleep(retry_after + random.uniform(1, 5))
+                    continue
+                raise RuntimeError(f"Rate limited. Retry after {retry_after} seconds")
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            # Check for GraphQL errors
+            if "errors" in data:
+                errors = data["errors"]
+                # Some errors might be recoverable
+                error_msg = str(errors[0].get("message", errors)) if errors else str(errors)
+                
+                # If it's a user not found error, that's different from API blocking
+                if "user" in error_msg.lower() and "not found" in error_msg.lower():
+                    raise RuntimeError(f"User '{username}' not found on LeetCode")
+                
+                # For other errors, retry if we have attempts left
+                if attempt < max_retries - 1:
+                    last_error = RuntimeError(f"LeetCode GraphQL error: {error_msg}")
+                    continue
+                
+                raise RuntimeError(f"LeetCode GraphQL error: {error_msg}")
+            
+            # Parse submissions
+            subs = (data.get("data") or {}).get("recentSubmissionList") or []
+            
+            # Find today's accepted submission
+            for s in subs:
+                try:
+                    ts = int(s["timestamp"])
+                except (ValueError, KeyError, TypeError):
+                    continue
+                
+                dt = datetime.fromtimestamp(ts, tz)
+                if dt.date() == today and s.get("statusDisplay") == "Accepted":
+                    return True, AcceptedInfo(
+                        title=s.get("title") or "Accepted",
+                        slug=s.get("titleSlug") or "",
+                        lang=s.get("lang") or "",
+                        time_hhmm=dt.strftime("%H:%M"),
+                    )
+            
+            # No accepted submission found for today
+            return False, None
+            
+        except requests.exceptions.Timeout as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                continue
+            raise RuntimeError(f"Request timeout after {max_retries} attempts: {e}")
+        
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                continue
+            raise RuntimeError(f"Request failed after {max_retries} attempts: {e}")
+        
+        except (KeyError, ValueError, TypeError) as e:
+            # Data parsing errors - don't retry
+            raise RuntimeError(f"Failed to parse LeetCode response: {e}")
+    
+    # If we exhausted retries, raise the last error
+    if last_error:
+        raise last_error
+    
     return False, None

@@ -205,3 +205,23 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Project specific
+.env
+.env.local
+*.log
+logs/
+*.pid
+*.sock
+bandit-report.json
+trivy-results.sarif
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Docker
+.dockerignore
+docker-compose.override.yml

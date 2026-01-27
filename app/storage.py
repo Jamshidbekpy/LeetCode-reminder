@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Optional
 from redis import Redis
+from app.database import Database, User
 
 @dataclass
 class DailyState:
@@ -11,6 +12,8 @@ class DailyState:
     reminded_times: set[str] # HH:MM
     congrats_sent: bool
     last_lc_check_ts: int    # unix seconds (throttle uchun)
+    last_error_ts: int = 0   # unix seconds (error spam prevention)
+    last_rate_limit_ts: int = 0  # unix seconds (rate limit error spam prevention)
 
 class Storage:
     """
@@ -18,17 +21,53 @@ class Storage:
     - users set: lc:users -> chat_id lar
     - user config hash: lc:user:{chat_id} -> username, tz, times(json)
     - daily state key: lc:state:{chat_id}:{date} -> json
+    
+    PostgreSQL:
+    - users table: telegram_id, telegram_username, leetcode_username, etc.
     """
 
-    def __init__(self, r: Redis):
+    def __init__(self, r: Redis, db: Optional[Database] = None):
         self.r = r
+        self.db = db  # PostgreSQL database (optional)
 
     # -------- users registry --------
-    def add_user(self, chat_id: int) -> None:
+    def add_user(
+        self,
+        chat_id: int,
+        telegram_username: Optional[str] = None,
+        telegram_first_name: Optional[str] = None,
+        telegram_last_name: Optional[str] = None,
+    ) -> None:
+        """Add user to Redis and PostgreSQL"""
         self.r.sadd("lc:users", str(chat_id))
+        
+        # Also save to PostgreSQL if available
+        if self.db:
+            try:
+                self.db.create_or_update_user(
+                    telegram_id=chat_id,
+                    telegram_username=telegram_username,
+                    telegram_first_name=telegram_first_name,
+                    telegram_last_name=telegram_last_name,
+                    is_active=True,
+                )
+            except Exception:
+                # PostgreSQL error shouldn't break Redis operations
+                pass
 
     def remove_user(self, chat_id: int) -> None:
+        """Remove user from Redis and mark as inactive in PostgreSQL"""
         self.r.srem("lc:users", str(chat_id))
+        
+        # Mark as inactive in PostgreSQL if available
+        if self.db:
+            try:
+                self.db.create_or_update_user(
+                    telegram_id=chat_id,
+                    is_active=False,
+                )
+            except Exception:
+                pass
 
     def list_users(self) -> list[int]:
         vals = self.r.smembers("lc:users")
@@ -45,21 +84,54 @@ class Storage:
         return f"lc:user:{chat_id}"
 
     def set_username(self, chat_id: int, username: str) -> None:
+        """Set LeetCode username in Redis and PostgreSQL"""
         self.r.hset(self._user_key(chat_id), "username", username)
+        
+        # Also save to PostgreSQL if available
+        if self.db:
+            try:
+                self.db.create_or_update_user(
+                    telegram_id=chat_id,
+                    leetcode_username=username,
+                )
+            except Exception:
+                pass
 
     def get_username(self, chat_id: int) -> Optional[str]:
         v = self.r.hget(self._user_key(chat_id), "username")
         return (v.decode() if isinstance(v, bytes) else v) if v else None
 
     def set_timezone(self, chat_id: int, tz: str) -> None:
+        """Set timezone in Redis and PostgreSQL"""
         self.r.hset(self._user_key(chat_id), "tz", tz)
+        
+        # Also save to PostgreSQL if available
+        if self.db:
+            try:
+                self.db.create_or_update_user(
+                    telegram_id=chat_id,
+                    timezone=tz,
+                )
+            except Exception:
+                pass
 
     def get_timezone(self, chat_id: int, default_tz: str) -> str:
         v = self.r.hget(self._user_key(chat_id), "tz")
         return (v.decode() if isinstance(v, bytes) else v) if v else default_tz
 
     def set_remind_times(self, chat_id: int, times: list[str]) -> None:
+        """Set remind times in Redis and PostgreSQL"""
         self.r.hset(self._user_key(chat_id), "times", json.dumps(times, ensure_ascii=False))
+        
+        # Also save to PostgreSQL if available
+        if self.db:
+            try:
+                self.db.create_or_update_user(
+                    telegram_id=chat_id,
+                    remind_times=times,
+                )
+            except Exception:
+                pass
 
     def get_remind_times(self, chat_id: int, default_times: list[str]) -> list[str]:
         v = self.r.hget(self._user_key(chat_id), "times")
@@ -82,7 +154,7 @@ class Storage:
         key = self._state_key(chat_id, date_str)
         v = self.r.get(key)
         if not v:
-            return DailyState(date=date_str, reminded_times=set(), congrats_sent=False, last_lc_check_ts=0)
+            return DailyState(date=date_str, reminded_times=set(), congrats_sent=False, last_lc_check_ts=0, last_error_ts=0, last_rate_limit_ts=0)
         try:
             raw = v.decode() if isinstance(v, bytes) else v
             obj = json.loads(raw)
@@ -91,9 +163,11 @@ class Storage:
                 reminded_times=set(obj.get("reminded_times") or []),
                 congrats_sent=bool(obj.get("congrats_sent")),
                 last_lc_check_ts=int(obj.get("last_lc_check_ts") or 0),
+                last_error_ts=int(obj.get("last_error_ts") or 0),
+                last_rate_limit_ts=int(obj.get("last_rate_limit_ts") or 0),
             )
         except Exception:
-            return DailyState(date=date_str, reminded_times=set(), congrats_sent=False, last_lc_check_ts=0)
+            return DailyState(date=date_str, reminded_times=set(), congrats_sent=False, last_lc_check_ts=0, last_error_ts=0, last_rate_limit_ts=0)
 
     def save_state(self, chat_id: int, state: DailyState) -> None:
         key = self._state_key(chat_id, state.date)
@@ -102,6 +176,8 @@ class Storage:
             "reminded_times": sorted(state.reminded_times),
             "congrats_sent": state.congrats_sent,
             "last_lc_check_ts": state.last_lc_check_ts,
+            "last_error_ts": state.last_error_ts,
+            "last_rate_limit_ts": state.last_rate_limit_ts,
         }
         # 8 kun TTL (state yig'ilib qolmasin)
         self.r.set(key, json.dumps(obj, ensure_ascii=False), ex=60 * 60 * 24 * 8)
