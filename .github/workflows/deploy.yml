@@ -22,8 +22,13 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /opt/leetcode-reminder
+            test -f .env || { echo "ERROR: .env yo'q, serverda .env yarating"; exit 1; }
             git pull origin main
-            docker-compose down
-            docker-compose build
-            docker-compose up -d
-            docker-compose logs --tail=50
+            DCC="docker compose"
+            if ! docker compose version >/dev/null 2>&1; then DCC="docker-compose"; fi
+            $DCC down
+            $DCC build --no-cache
+            $DCC up -d
+            sleep 8
+            $DCC ps
+            $DCC logs --tail=80

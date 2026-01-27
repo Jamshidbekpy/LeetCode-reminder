@@ -9,6 +9,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-COPY .env ./.env
+# .env serverda/lokalda bor bo'ladi, docker-compose env_file orqali beriladi
 
 CMD ["python", "-m", "app.bot"]

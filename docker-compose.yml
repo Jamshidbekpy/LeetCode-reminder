@@ -7,6 +7,11 @@ services:
       - redis_data:/data
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   postgres:
     image: postgres:15-alpine
@@ -24,15 +29,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   bot:
     build: .
     restart: always
     env_file:
       - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      POSTGRESQL_URL: postgresql://postgres:postgres@postgres:5432/leetcode_bot
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -45,8 +56,13 @@ services:
     command: python -m app.api_server
     env_file:
       - .env
+    environment:
+      POSTGRESQL_URL: postgresql://postgres:postgres@postgres:5432/leetcode_bot
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     ports:
       - "8000:8000"
     logging:
@@ -61,8 +77,11 @@ services:
     command: celery -A app.celery_app worker --loglevel=info
     env_file:
       - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -75,9 +94,13 @@ services:
     command: celery -A app.celery_app beat --loglevel=info
     env_file:
       - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
     depends_on:
-      - redis
-      - celery_worker
+      redis:
+        condition: service_healthy
+      celery_worker:
+        condition: service_started
     logging:
       driver: "json-file"
       options:
