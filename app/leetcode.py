@@ -59,7 +59,7 @@ def _get_session() -> requests.Session:
         
         # Retry strategy: exponential backoff
         retry_strategy = Retry(
-            total=3,
+            total=1,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["POST", "GET"],
@@ -110,7 +110,7 @@ def problem_link(slug: str) -> str:
         return "https://leetcode.com/problemset/"
     return f"https://leetcode.com/problems/{slug}/"
 
-def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[bool, AcceptedInfo | None]:
+def solved_today(username: str, tz_name: str, max_retries: int = 2) -> tuple[bool, AcceptedInfo | None]:
     """
     Check if user solved a problem today.
     

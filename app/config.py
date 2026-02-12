@@ -20,6 +20,8 @@ class Settings:
     api_port: int
     celery_check_interval: int  # Celery Beat interval (seconds)
     use_celery: bool  # Celery ishlatish yoki yo'q
+    enable_background_checks: bool  # Scheduler orqali tashqi API tekshirish
+    external_api_cooldown_seconds: int  # /check va /status uchun cooldown
     log_level: str  # Logging level
     log_file: str | None  # Log file path (optional)
 
@@ -41,8 +43,8 @@ def get_settings() -> Settings:
         "postgresql://postgres:postgres@localhost:5432/leetcode_bot"
     ).strip()
 
-    poll_seconds = int(os.getenv("POLL_SECONDS", "30"))
-    lc_check_seconds = int(os.getenv("LC_CHECK_SECONDS", "300"))
+    poll_seconds = int(os.getenv("POLL_SECONDS", "60"))
+    lc_check_seconds = int(os.getenv("LC_CHECK_SECONDS", "1800"))
 
     default_tz = os.getenv("DEFAULT_TZ", "Asia/Tashkent").strip()
     default_remind_times = _split_times(os.getenv("DEFAULT_REMIND_TIMES", "20:00"))
@@ -51,8 +53,10 @@ def get_settings() -> Settings:
     api_port = int(os.getenv("API_PORT", "8000"))
     
     # Celery sozlamalari
-    celery_check_interval = int(os.getenv("CELERY_CHECK_INTERVAL", "300"))  # Default: 5 minut
-    use_celery = os.getenv("USE_CELERY", "true").lower() in ("true", "1", "yes")
+    celery_check_interval = int(os.getenv("CELERY_CHECK_INTERVAL", "1800"))  # Default: 30 minut
+    use_celery = os.getenv("USE_CELERY", "false").lower() in ("true", "1", "yes")
+    enable_background_checks = os.getenv("ENABLE_BACKGROUND_CHECKS", "false").lower() in ("true", "1", "yes")
+    external_api_cooldown_seconds = int(os.getenv("EXTERNAL_API_COOLDOWN_SECONDS", "120"))
     
     # Logging
     log_level = os.getenv("LOG_LEVEL", "INFO").strip().upper()
@@ -72,6 +76,8 @@ def get_settings() -> Settings:
         api_port=api_port,
         celery_check_interval=celery_check_interval,
         use_celery=use_celery,
+        enable_background_checks=enable_background_checks,
+        external_api_cooldown_seconds=external_api_cooldown_seconds,
         log_level=log_level,
         log_file=log_file,
     )

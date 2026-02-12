@@ -31,7 +31,7 @@ celery_app.conf.update(
 
 # Celery Beat periodic tasks
 # Interval'ni sozlamalardan olish (sekundlarda)
-check_interval_seconds = max(60, settings.celery_check_interval)  # Minimum 1 minut
+check_interval_seconds = max(300, settings.celery_check_interval)  # Minimum 5 minut
 
 celery_app.conf.beat_schedule = {
     "check-leetcode-users": {

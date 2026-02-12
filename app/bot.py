@@ -248,6 +248,15 @@ async def check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     tz = storage.get_timezone(chat_id, settings.default_tz)
+    allowed, remaining = storage.acquire_external_api_slot(
+        chat_id, settings.external_api_cooldown_seconds
+    )
+    if not allowed:
+        await update.message.reply_text(
+            f"⏳ Juda tez-tez so'rov yuborildi. Iltimos {remaining} soniyadan keyin qayta urinib ko'ring."
+        )
+        return
+
     try:
         ok, info = solved_today(username, tz)
     except RuntimeError as e:
@@ -292,6 +301,17 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    allowed, remaining = storage.acquire_external_api_slot(
+        chat_id, settings.external_api_cooldown_seconds
+    )
+    if not allowed:
+        await update.message.reply_text(
+            "⏳ Tashqi API cooldown faol.\n"
+            f"Iltimos {remaining} soniyadan keyin qayta urinib ko'ring.\n"
+            f"👤 {username}\nTZ: {tz}\nRemind: {', '.join(times) if times else 'yo‘q'}"
+        )
+        return
+
     try:
         ok, info = solved_today(username, tz)
     except RuntimeError as e:
@@ -332,6 +352,9 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _post_init(app: Application):
     settings = app.bot_data["settings"]
     storage: Storage = app.bot_data["storage"]
+
+    if not settings.enable_background_checks:
+        return
 
     # Background scheduler
     scheduler_task = asyncio.create_task(

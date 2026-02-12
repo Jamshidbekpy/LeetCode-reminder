@@ -146,6 +146,27 @@ class Storage:
             return default_times
         return default_times
 
+    # -------- external api cooldown --------
+    def _api_cooldown_key(self, chat_id: int) -> str:
+        return f"lc:api_cooldown:{chat_id}"
+
+    def acquire_external_api_slot(self, chat_id: int, cooldown_seconds: int) -> tuple[bool, int]:
+        """
+        Acquire cooldown slot for external API calls.
+        Returns (allowed, remaining_seconds_if_blocked).
+        """
+        if cooldown_seconds <= 0:
+            return True, 0
+
+        key = self._api_cooldown_key(chat_id)
+        # NX + EX => set only if key does not exist
+        acquired = self.r.set(key, "1", ex=cooldown_seconds, nx=True)
+        if acquired:
+            return True, 0
+
+        ttl = self.r.ttl(key)
+        return False, max(int(ttl), 0)
+
     # -------- daily state --------
     def _state_key(self, chat_id: int, date_str: str) -> str:
         return f"lc:state:{chat_id}:{date_str}"
