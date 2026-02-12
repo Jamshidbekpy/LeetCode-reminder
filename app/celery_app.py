@@ -25,6 +25,8 @@ celery_app.conf.update(
     task_soft_time_limit=280,
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=50,
+    # Celery 6.0+ compatibility
+    broker_connection_retry_on_startup=True,
 )
 
 # Celery Beat periodic tasks

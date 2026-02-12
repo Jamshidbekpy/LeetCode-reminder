@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import pytz
 from redis import Redis
@@ -333,7 +334,7 @@ async def _post_init(app: Application):
     storage: Storage = app.bot_data["storage"]
 
     # Background scheduler
-    app.create_task(
+    scheduler_task = asyncio.create_task(
         run_scheduler(
             bot=app.bot,
             storage=storage,
@@ -344,6 +345,18 @@ async def _post_init(app: Application):
             use_celery=settings.use_celery,
         )
     )
+    app.bot_data["scheduler_task"] = scheduler_task
+
+
+async def _post_shutdown(app: Application):
+    """Cancel background scheduler task gracefully."""
+    task = app.bot_data.get("scheduler_task")
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 def main():
     settings = get_settings()
@@ -363,6 +376,7 @@ def main():
         Application.builder()
         .token(settings.bot_token)
         .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
         .build()
     )
 
