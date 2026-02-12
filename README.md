@@ -511,6 +511,7 @@ Key metrics to monitor:
 - Check bot token in `.env`
 - Verify Redis is running
 - Check bot logs: `docker-compose logs bot`
+- After deploy/restart, monitor for 2-5 minutes: `docker compose logs -f bot`
 
 **API not accessible**
 - Verify PostgreSQL connection
@@ -526,6 +527,15 @@ Key metrics to monitor:
 - Verify PostgreSQL is running
 - Check connection string in `.env`
 - Ensure database exists
+- Ensure `.env` has matching DB vars: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
+- If password/auth keeps failing with old data, recreate DB volume: `docker compose down -v && docker compose up -d`
+
+**`/check` or `/status` gives LeetCode API errors**
+- This can happen when LeetCode returns non-JSON (Cloudflare/challenge page) even with status 200
+- Try again after a few minutes (temporary upstream block/rate limit)
+- Verify server clock and timezone are correct (NTP enabled)
+- Monitor logs: `docker compose logs -f bot`
+- If this repeats often on your server IP, add a fallback provider for LeetCode checks
 
 ## 📄 License
 
