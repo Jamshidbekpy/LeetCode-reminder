@@ -11,7 +11,7 @@ import pytz
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-LC_GRAPHQL = "https://leetcode.com/graphql/"
+LC_GRAPHQL = "https://leetcode.com/graphql"
 
 # Real browser user agents (rotate to avoid detection)
 USER_AGENTS = [
@@ -68,22 +68,13 @@ def _get_session() -> requests.Session:
     return _session
 
 def _get_headers() -> dict[str, str]:
-    """Generate browser-like headers to avoid detection."""
+    """Generate safe headers for server-to-server GraphQL requests."""
     return {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept": "application/json",
         "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
         "Content-Type": "application/json",
-        "Origin": "https://leetcode.com",
         "Referer": "https://leetcode.com/",
-        "Connection": "keep-alive",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
-        "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
     }
 
 def problem_link(slug: str) -> str:
@@ -134,8 +125,18 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
                 json=payload,
                 headers=headers,
                 timeout=30,
-                allow_redirects=True,
+                allow_redirects=False,
             )
+
+            # Redirect bo'lsa ko'pincha HTML sahifaga ketadi (JSON emas)
+            if 300 <= response.status_code < 400:
+                location = response.headers.get("Location", "")
+                last_error = RuntimeError(
+                    f"LeetCode redirect qaytardi (status={response.status_code}, location={location})."
+                )
+                if attempt < max_retries - 1:
+                    continue
+                raise last_error
             
             # Check for rate limiting
             if response.status_code == 429:

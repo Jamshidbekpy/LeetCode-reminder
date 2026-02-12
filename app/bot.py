@@ -75,6 +75,7 @@ async def stop_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🛑 O‘chirildi. Endi bu chatga eslatmalar kelmaydi.")
 
 async def setusername_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    settings = context.application.bot_data["settings"]
     storage: Storage = context.application.bot_data["storage"]
     chat_id = update.effective_chat.id
 
@@ -83,6 +84,30 @@ async def setusername_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     username = _normalize_username(context.args[0])
+    tz = storage.get_timezone(chat_id, settings.default_tz)
+
+    # External API orqali username ni oldindan tekshiramiz.
+    # Tekshiruvdan o'tmagan username saqlanmaydi.
+    try:
+        solved_today(username, tz, max_retries=2)
+    except RuntimeError as e:
+        error_msg = str(e).lower()
+        if "not found" in error_msg:
+            await update.message.reply_text(
+                f"❌ LeetCode foydalanuvchi topilmadi: {username}\n"
+                "Iltimos username ni to'g'ri kiriting."
+            )
+        else:
+            await update.message.reply_text(
+                "⚠️ LeetCode API vaqtincha ishlamayapti. "
+                "Username hozircha saqlanmadi, iltimos keyinroq qayta urinib ko'ring."
+            )
+        return
+    except Exception as e:
+        await update.message.reply_text(
+            f"⚠️ Username tekshirishda kutilmagan xato: {type(e).__name__}: {e}"
+        )
+        return
     
     # Get user info from Telegram
     user = update.effective_user
