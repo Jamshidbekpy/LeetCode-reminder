@@ -11,7 +11,11 @@ import pytz
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-LC_GRAPHQL = "https://leetcode.com/graphql"
+LC_GRAPHQL_ENDPOINTS = [
+    "https://leetcode.com/graphql",
+    "https://leetcode.com/graphql/",
+]
+LC_HOME = "https://leetcode.com/"
 
 # Real browser user agents (rotate to avoid detection)
 USER_AGENTS = [
@@ -67,15 +71,39 @@ def _get_session() -> requests.Session:
     
     return _session
 
-def _get_headers() -> dict[str, str]:
+def _get_headers(csrf_token: str | None = None) -> dict[str, str]:
     """Generate safe headers for server-to-server GraphQL requests."""
-    return {
+    headers = {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept": "application/json",
         "Accept-Language": "en-US,en;q=0.9",
         "Content-Type": "application/json",
+        "Origin": "https://leetcode.com",
         "Referer": "https://leetcode.com/",
     }
+    if csrf_token:
+        headers["x-csrftoken"] = csrf_token
+        headers["x-requested-with"] = "XMLHttpRequest"
+    return headers
+
+
+def _prime_session(session: requests.Session) -> str | None:
+    """Warm up cookies and return csrf token if available."""
+    try:
+        response = session.get(
+            LC_HOME,
+            headers={
+                "User-Agent": random.choice(USER_AGENTS),
+                "Accept": "text/html,application/xhtml+xml",
+                "Referer": "https://leetcode.com/",
+            },
+            timeout=20,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        return None
+    return session.cookies.get("csrftoken")
 
 def problem_link(slug: str) -> str:
     if not slug:
@@ -108,7 +136,8 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
     }
     
     session = _get_session()
-    headers = _get_headers()
+    csrf_token = _prime_session(session)
+    headers = _get_headers(csrf_token)
     
     last_error = None
     
@@ -120,8 +149,9 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
                 time.sleep(delay)
             
             # Make request with proper headers
+            endpoint = LC_GRAPHQL_ENDPOINTS[attempt % len(LC_GRAPHQL_ENDPOINTS)]
             response = session.post(
-                LC_GRAPHQL,
+                endpoint,
                 json=payload,
                 headers=headers,
                 timeout=30,
@@ -135,6 +165,8 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
                     f"LeetCode redirect qaytardi (status={response.status_code}, location={location})."
                 )
                 if attempt < max_retries - 1:
+                    csrf_token = _prime_session(session)
+                    headers = _get_headers(csrf_token)
                     continue
                 raise last_error
             
@@ -143,6 +175,8 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
                 retry_after = int(response.headers.get("Retry-After", 60))
                 if attempt < max_retries - 1:
                     time.sleep(retry_after + random.uniform(1, 5))
+                    csrf_token = _prime_session(session)
+                    headers = _get_headers(csrf_token)
                     continue
                 raise RuntimeError(f"Rate limited. Retry after {retry_after} seconds")
 
@@ -155,6 +189,8 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
                     f"(status={response.status_code}). Keyinroq urinib ko'ring."
                 )
                 if attempt < max_retries - 1:
+                    csrf_token = _prime_session(session)
+                    headers = _get_headers(csrf_token)
                     continue
                 raise last_error
 
@@ -166,6 +202,8 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
                     "Sayt vaqtincha bloklagan yoki o'zgartirgan bo'lishi mumkin. Keyinroq urinib ko'ring."
                 )
                 if attempt < max_retries - 1:
+                    csrf_token = _prime_session(session)
+                    headers = _get_headers(csrf_token)
                     continue
                 raise last_error
             
@@ -182,6 +220,8 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
                 # For other errors, retry if we have attempts left
                 if attempt < max_retries - 1:
                     last_error = RuntimeError(f"LeetCode GraphQL error: {error_msg}")
+                    csrf_token = _prime_session(session)
+                    headers = _get_headers(csrf_token)
                     continue
                 
                 raise RuntimeError(f"LeetCode GraphQL error: {error_msg}")
@@ -211,6 +251,8 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
         except requests.exceptions.Timeout as e:
             last_error = e
             if attempt < max_retries - 1:
+                csrf_token = _prime_session(session)
+                headers = _get_headers(csrf_token)
                 continue
             raise RuntimeError(f"Request timeout after {max_retries} attempts: {e}")
 
@@ -220,6 +262,8 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
                 "Bir necha daqiqa keyin /check yoki /status ni qayta urinib ko'ring."
             )
             if attempt < max_retries - 1:
+                csrf_token = _prime_session(session)
+                headers = _get_headers(csrf_token)
                 continue
             raise last_error
 
@@ -232,6 +276,8 @@ def solved_today(username: str, tz_name: str, max_retries: int = 3) -> tuple[boo
                     "Bir necha daqiqa keyin /check yoki /status ni qayta urinib ko'ring."
                 )
             if attempt < max_retries - 1:
+                csrf_token = _prime_session(session)
+                headers = _get_headers(csrf_token)
                 continue
             raise last_error if isinstance(last_error, RuntimeError) else RuntimeError(
                 f"So'rov {max_retries} marta muvaffaqiyatsiz: {e}"
