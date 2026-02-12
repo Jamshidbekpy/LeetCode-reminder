@@ -249,7 +249,7 @@ async def check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     tz = storage.get_timezone(chat_id, settings.default_tz)
     allowed, remaining = storage.acquire_external_api_slot(
-        chat_id, settings.external_api_cooldown_seconds
+        chat_id, settings.external_api_cooldown_seconds, scope="check"
     )
     if not allowed:
         await update.message.reply_text(
@@ -302,7 +302,7 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     allowed, remaining = storage.acquire_external_api_slot(
-        chat_id, settings.external_api_cooldown_seconds
+        chat_id, settings.external_api_cooldown_seconds, scope="status"
     )
     if not allowed:
         await update.message.reply_text(
