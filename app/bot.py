@@ -306,8 +306,7 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if not allowed:
         await update.message.reply_text(
-            "⏳ Tashqi API cooldown faol.\n"
-            f"Iltimos {remaining} soniyadan keyin qayta urinib ko'ring.\n"
+            f"⏳ Juda tez-tez so'rov yuborildi. Iltimos {remaining} soniyadan keyin qayta urinib ko'ring.\n"
             f"👤 {username}\nTZ: {tz}\nRemind: {', '.join(times) if times else 'yo‘q'}"
         )
         return
