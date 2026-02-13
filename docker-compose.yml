@@ -136,7 +136,7 @@ services:
   celery_beat:
     build: .
     restart: always
-    command: celery -A app.celery_app beat --loglevel=info
+    command: celery -A app.celery_app beat --loglevel=info -s /tmp/celerybeat-schedule
     env_file:
       - .env
     environment:
