@@ -99,7 +99,18 @@ class Storage:
 
     def get_username(self, chat_id: int) -> Optional[str]:
         v = self.r.hget(self._user_key(chat_id), "username")
-        return (v.decode() if isinstance(v, bytes) else v) if v else None
+        if v:
+            return (v.decode() if isinstance(v, bytes) else v)
+        # PostgreSQL fallback (Redis yo'qolsa yoki eviction bo'lsa)
+        if self.db:
+            try:
+                user = self.db.get_user_by_telegram_id(chat_id)
+                if user and user.leetcode_username:
+                    self.r.hset(self._user_key(chat_id), "username", user.leetcode_username)
+                    return user.leetcode_username
+            except Exception:
+                pass
+        return None
 
     def set_timezone(self, chat_id: int, tz: str) -> None:
         """Set timezone in Redis and PostgreSQL"""
@@ -117,7 +128,17 @@ class Storage:
 
     def get_timezone(self, chat_id: int, default_tz: str) -> str:
         v = self.r.hget(self._user_key(chat_id), "tz")
-        return (v.decode() if isinstance(v, bytes) else v) if v else default_tz
+        if v:
+            return (v.decode() if isinstance(v, bytes) else v)
+        if self.db:
+            try:
+                user = self.db.get_user_by_telegram_id(chat_id)
+                if user and user.timezone:
+                    self.r.hset(self._user_key(chat_id), "tz", user.timezone)
+                    return user.timezone
+            except Exception:
+                pass
+        return default_tz
 
     def set_remind_times(self, chat_id: int, times: list[str]) -> None:
         """Set remind times in Redis and PostgreSQL"""
@@ -135,15 +156,23 @@ class Storage:
 
     def get_remind_times(self, chat_id: int, default_times: list[str]) -> list[str]:
         v = self.r.hget(self._user_key(chat_id), "times")
-        if not v:
-            return default_times
-        try:
-            raw = v.decode() if isinstance(v, bytes) else v
-            arr = json.loads(raw)
-            if isinstance(arr, list):
-                return [str(x) for x in arr]
-        except Exception:
-            return default_times
+        if v:
+            try:
+                raw = v.decode() if isinstance(v, bytes) else v
+                arr = json.loads(raw)
+                if isinstance(arr, list):
+                    return [str(x) for x in arr]
+            except Exception:
+                pass
+        if self.db:
+            try:
+                user = self.db.get_user_by_telegram_id(chat_id)
+                if user and user.remind_times:
+                    times = [str(t) for t in user.remind_times]
+                    self.r.hset(self._user_key(chat_id), "times", json.dumps(times, ensure_ascii=False))
+                    return times
+            except Exception:
+                pass
         return default_times
 
     # -------- external api cooldown --------
